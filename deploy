@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o xtrace
+
+readonly PROG=encoders2mopidy
+readonly TARGET_HOST=pi@pizero
+readonly TARGET_PATH=/home/pi/code/${PROG}
+readonly TARGET_ARCH=arm-unknown-linux-gnueabihf
+export OPENSSL_DIR=/home/jon/openssl/cross_compile_rpi_armv6
+#readonly SOURCE_PATH=./target/${TARGET_ARCH}/release/${PROG}
+readonly SOURCE_PATH=./target/${TARGET_ARCH}/debug/${PROG}
+cargo build --target=${TARGET_ARCH}
+#cargo build --release --target=${TARGET_ARCH}
+rsync ${SOURCE_PATH} ${TARGET_HOST}:${TARGET_PATH}
+ssh -t ${TARGET_HOST} ${TARGET_PATH}
