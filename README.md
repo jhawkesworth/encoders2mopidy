@@ -48,17 +48,17 @@ GPIO ----- ENC CLK ---
 Setup
 
 To cross-compile from sources on ubuntu
-
+```
 sudo apt install gcc-arm-linux-gnueabihf
-
-https://disconnected.systems/blog/rust-powered-rover/#setting-up-rust-for-cross-compiling
-note extra fiddle for v6 (pi zero) as per
+```
+See https://disconnected.systems/blog/rust-powered-rover/#setting-up-rust-for-cross-compiling
+Note the extra fiddle for v6 (pi zero) as per
 https://github.com/BurntSushi/ripgrep/issues/676#issuecomment-374058198
-
+```
 BUILDDIR="${HOME}/build-rpi"
 mkdir -p "${BUILDDIR}"
 test -d "${BUILDDIR}/tools" || git -C "${BUILDDIR}" clone --depth=1 https://github.com/raspberrypi/tools.git
-
+```
 For armv7 pi 2/3/4 full size boards (which I have not tested):
 https://medium.com/swlh/compiling-rust-for-raspberry-pi-arm-922b55dbb050
 
@@ -68,6 +68,23 @@ build and copy to your Raspberry Pi.  Run it like
 .\deploy <hostname>
 ```
 
+Once you are happy the code is doing what you want,
 
+Copy the encoders2modpidy.service file to /etc/systemd/system (you'll need to sudo).
 
-Copy the encoders2modpidy.service file to /etc/systemd/system
+The exe should then be manageable as a service using normal systemd operations.
+
+Remember to enable using systemctl
+
+Software power on off via gpio button.
+
+If you have a pushbutton lying around you can connect it up between a ground pin and
+gpio 3 (only gpio 3 apparent - tip from stderr.nl/Blog/ )
+and it will  enables soft shutdown/bootup via the button press, if you add the following
+ line to /boot/config.txt
+```
+dtoverlay=gpio-shutdown,gpio_pin=3
+```
+The board still gets powered and you'd do well to wait until all the LED flashing
+has stopped before disconnecting the power cable. 
+
