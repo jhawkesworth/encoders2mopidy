@@ -34,16 +34,16 @@ The veroboard is essentially just a way of inserting the correct resistors betwe
 
 Since they are common anode LEDS, they are powered from 3v3 bus and switched by the gpio pins.
 
-
-                     |-------- >| R ------------------ 220Ohm --- GPIO
-+3v3  ------+-------- >| G ----------------- 220Ohm --- GPIO
-                     |-------- >| B ------------------ 220Ohm --- GPIO
-                     |-------- / SW ---------------- 220Ohm --- GPIO
+```
+                       |-------- >| R ------------------ 220Ohm --- GPIO
+           +3v3  ------+-------- >| G ----------------- 220Ohm --- GPIO
+                       |-------- >| B ------------------ 220Ohm --- GPIO
+                       |-------- / SW ---------------- 220Ohm --- GPIO
 
 GPIO ----- ENC DT ---
 GND  ------------------<
 GPIO ----- ENC CLK ---
-
+```
 
 Setup
 
@@ -63,7 +63,11 @@ For armv7 pi 2/3/4 full size boards (which I have not tested):
 https://medium.com/swlh/compiling-rust-for-raspberry-pi-arm-922b55dbb050
 
 Once you have the code cross-compiling, you can use the 'deploy' script to 
-build and copy to your Raspberry Pi.
+build and copy to your Raspberry Pi.  Run it like 
+```
+.\deploy <hostname>
+```
+
 
 
 Copy the encoders2modpidy.service file to /etc/systemd/system
