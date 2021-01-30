@@ -2,19 +2,34 @@
 use std::thread;
 use std::time::Duration;
 
-
 use rust_gpiozero::*;
 
 use rppal::gpio::Gpio;
 use rppal::gpio::Trigger::FallingEdge;
 
-use std::io;
-use std::io::prelude::*;
-use std::sync::atomic::{AtomicBool, Ordering};
+//use std::io;
+//use std::io::prelude::*;
+//use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Serialize, Deserialize};
 //use rppal::gpio::Gpio;
 
+use std::sync::mpsc;
 use ureq::{Agent, Response, Error};
+
+
+/*
+TODOs
+* get rid of rust_gpiozero code and move it to using rppal
+* figure out how to debounce the button presses.
+* improve the structs so that I don't need 3 to handle the
+result being string/integer or boolean.
+* move all of the the message sending to a separate thread
+* refactor out lots of duplicated code
+* get the rgb leds to do anything useful
+* move next button to next/prev on rotation
+
+ */
+
 
 //use reqwest::Url;
 
@@ -36,13 +51,8 @@ const ROTARY2_BUTTON: u8 = 16; // GPIO 16, phys 36
 
 const MOPIDY_RPC_ENDPOINT: &str = "http://localhost:6680/mopidy/rpc";
 const ENCODER_WAIT_MILLIS: u64 = 2;
-static RUNNING: AtomicBool = AtomicBool::new(true);
+const MOPIDY_RECOVERY_TIME_WAIT_MILLIS: u64 = 222;
 
-fn watch_stdin() {
-    // wait for key press to exit
-    let _ = io::stdin().read(&mut [0u8]).unwrap();
-    RUNNING.store(false, Ordering::Relaxed);
-}
 
 // {"jsonrpc": "2.0", "id": 1, "result": 20}
 #[derive(Debug, Deserialize)]
@@ -74,27 +84,52 @@ struct JsonRpcRequest {
     params: Option<Vec<i32>>
 }
 
-fn set_volume(agent: &ureq::Agent, new_volume: i32) {
-    println!("Setting volume");
 
-    let resp: Result<Response, Error> = agent.post(MOPIDY_RPC_ENDPOINT)
-        //.send_json(SerdeValue::)  // todo get this to work with JsonRpcRequest
-         .send_json(ureq::json!({
+fn mopidy_volume_message_handler(rx: std::sync::mpsc::Receiver<i32>) {
+    let agent: Agent = ureq::AgentBuilder::new()
+        .timeout_read(Duration::from_secs(5))
+        .timeout_write(Duration::from_secs(5))
+        .build();
+
+    loop {
+        // only want to pop the last value off the receiver (use it like a stack)
+        // iterating the values has exactly the desired effect of 'consuming'
+        // all the values it seems.
+        let content_iter = rx.try_iter();
+        let mut new_volume = -1;
+        //let mut debug_channel_content_size = 0;
+        for value in content_iter {
+            //debug_channel_content_size = debug_channel_content_size +1;
+            new_volume = value;
+        }
+        //println!("THE CHANNEL CONTENT SIZE IS {}", debug_channel_content_size);
+
+        // below zero makes mopidy go bang and conveniently also tells us
+        // there's no change to process, so the thread can go back to sleep again.
+        if new_volume > -1 {
+            println!("setting volume to {}", new_volume);
+            let resp: Result<Response, Error> = agent.post(MOPIDY_RPC_ENDPOINT)
+                //.send_json(SerdeValue::)  // todo get this to work with JsonRpcRequest
+                .send_json(ureq::json!({
            "jsonrpc": "2.0",
            "id": 1,
            "method": "core.mixer.set_volume",
            "params": vec![new_volume],
-       }));
-    match resp {
-        Ok(response) => {
-            let json: JsonRpcResponseBool = response.into_json().expect("duff json");
-            println!("set volume result was {:?}", json.result);
+           }));
+            match resp {
+                Ok(response) => {
+                    let json: JsonRpcResponseBool = response.into_json().expect("duff json");
+                    println!("set volume result was {:?}", json.result);
+                }
+                Err(Error::Status(code, _response)) => {panic!("bad response {} ", code);}
+                Err(_) => { panic!("really bad response");}
+            }
         }
-        Err(Error::Status(code, _response)) => {panic!("bad response {} ", code);}
-        Err(_) => { panic!("really bad response");}
+
+        // a nice big sleep here to stop flooding mopidy with changes
+        thread::sleep(Duration::from_millis(MOPIDY_RECOVERY_TIME_WAIT_MILLIS));
     }
 }
-
 
 fn get_volume(agent: &ureq::Agent) -> i32 {
     println!("Getting volume");
@@ -142,7 +177,7 @@ fn next() {
            "method": method,
        }));
     match change_response {
-        Ok(response2) => {
+        Ok(_response2) => {
             println!("Success response for method: {}", &method);
         }
         Err(Error::Status(code, _response)) => {panic!("bad response {} ", code);}
@@ -189,7 +224,7 @@ fn toggle_play_pause() {
            "method": method,
        }));
     match change_response {
-        Ok(response2) => {
+        Ok(_response2) => {
             println!("changed to state: {}", &method);
         }
         Err(Error::Status(code, _response)) => {panic!("bad response {} ", code);}
@@ -200,26 +235,30 @@ fn toggle_play_pause() {
 
 fn main() -> Result<(), Box<dyn std::error::Error>>  {
     println!("encoders2mopidy starting");
-    std::thread::spawn(watch_stdin);
+    let (tx, rx) = mpsc::channel();
+
+    // start the thread that sends volume change messages to mopidy.
+    std::thread::spawn(move || mopidy_volume_message_handler(rx));
+
     let rotary2_dt = DigitalInputDevice::new_with_pullup(12); //rot 1: 4
     let rotary2_clk = DigitalInputDevice::new_with_pullup(6); //rot 1: 14
-
     let mut rotary2_button = Gpio::new()?.get(ROTARY2_BUTTON)?.into_input_pulldown(); // GPIO 16, phys 36
-
     let mut rotary1_button = Gpio::new()?.get(ROTARY1_BUTTON)?.into_input_pulldown();
 
     let agent: Agent = ureq::AgentBuilder::new()
         .timeout_read(Duration::from_secs(5))
         .timeout_write(Duration::from_secs(5))
         .build();
-    rotary2_button.set_async_interrupt(FallingEdge, |level| { toggle_play_pause() }).expect("bad interrupt setup rot2");
 
-    rotary1_button.set_async_interrupt(FallingEdge, |level| {next()}).expect("bad interrupt setup rot1");
+    rotary2_button.set_async_interrupt(FallingEdge, |_level| { toggle_play_pause() }).expect("bad interrupt setup rot2");
+    rotary1_button.set_async_interrupt(FallingEdge, |_level| { next() }).expect("bad interrupt setup rot1");
 
     let mut volume = get_volume(&agent);
     println!("volume is {}", &volume);
 
-    while RUNNING.load(Ordering::Relaxed) {
+    //while RUNNING.load(Ordering::Relaxed)
+    loop
+    {
         //println!("in while running.load");
         thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
         let mut dt_val = rotary2_dt.value();
@@ -228,7 +267,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>>  {
         if dt_val.eq(&true) && clk_val.eq(&false) {
             volume = volume +1;
             println!("-> {}", volume);
-            set_volume(&agent, volume);
+            //set_volume(&agent, volume);
+            tx.send(volume).unwrap();
             while clk_val.eq(&false) {
                 thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
                 clk_val = rotary2_clk.value();
@@ -239,8 +279,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>>  {
             }
         } else if dt_val.eq(&true) && clk_val.eq(&true) {
             volume = volume -1;
+            if volume < 0 { volume = 0;}
             println!("<- {}", volume);
-            set_volume(&agent, volume);
+            //set_volume(&agent, volume);
+            tx.send(volume).unwrap();
             while dt_val.eq(&true) {
                 thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
                 dt_val = rotary2_dt.value();
@@ -250,5 +292,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>>  {
             thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
         }
     }
-    Ok(())
+    //Ok(())
 }

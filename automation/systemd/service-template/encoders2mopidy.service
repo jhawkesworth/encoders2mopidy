@@ -1,0 +1,7 @@
+[Unit]
+Description=A service to allow Mopidy to be controlled using Pimoroni COM1006 RGB Rotary Encoders
+After=systemd-user-sessions.service
+
+[Service]
+Type=simple
+ExecStart=/home/pi/code/encoders2mopidy
