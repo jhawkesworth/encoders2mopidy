@@ -1,6 +1,6 @@
 //use std::error::Error;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rust_gpiozero::*;
 
@@ -30,9 +30,6 @@ result being string/integer or boolean.
 
  */
 
-
-//use reqwest::Url;
-
 //const GPIO_R: u8 = 17;
 //const GPIO_G: u8 = 27;
 //const GPIO_B: u8 = 22;
@@ -52,6 +49,8 @@ const ROTARY2_BUTTON: u8 = 16; // GPIO 16, phys 36
 const MOPIDY_RPC_ENDPOINT: &str = "http://localhost:6680/mopidy/rpc";
 const ENCODER_WAIT_MILLIS: u64 = 2;
 const MOPIDY_RECOVERY_TIME_WAIT_MILLIS: u64 = 222;
+
+const SWITCH_DEBOUNCE_MILLIS: u64 = 333;
 
 
 // {"jsonrpc": "2.0", "id": 1, "result": 20}
@@ -85,17 +84,14 @@ struct JsonRpcRequest {
 }
 
 
-fn mopidy_volume_message_handler(rx: std::sync::mpsc::Receiver<i32>) {
-    let agent: Agent = ureq::AgentBuilder::new()
-        .timeout_read(Duration::from_secs(5))
-        .timeout_write(Duration::from_secs(5))
-        .build();
+fn mopidy_volume_message_handler(volume_receiver: std::sync::mpsc::Receiver<i32>) {
+
 
     loop {
         // only want to pop the last value off the receiver (use it like a stack)
         // iterating the values has exactly the desired effect of 'consuming'
         // all the values it seems.
-        let content_iter = rx.try_iter();
+        let content_iter = volume_receiver.try_iter();
         let mut new_volume = -1;
         //let mut debug_channel_content_size = 0;
         for value in content_iter {
@@ -108,6 +104,10 @@ fn mopidy_volume_message_handler(rx: std::sync::mpsc::Receiver<i32>) {
         // there's no change to process, so the thread can go back to sleep again.
         if new_volume > -1 {
             println!("setting volume to {}", new_volume);
+            let agent: Agent = ureq::AgentBuilder::new()
+                .timeout_read(Duration::from_secs(5))
+                .timeout_write(Duration::from_secs(5))
+                .build();
             let resp: Result<Response, Error> = agent.post(MOPIDY_RPC_ENDPOINT)
                 //.send_json(SerdeValue::)  // todo get this to work with JsonRpcRequest
                 .send_json(ureq::json!({
@@ -141,19 +141,19 @@ fn get_volume(agent: &ureq::Agent) -> i32 {
           "id": 1,
           "method": "core.mixer.get_volume"
       }));
-    match resp {
+    return match resp {
         Ok(response) => {
             let json: JsonRpcResponse = response.into_json().expect("duff json");
             println!("Current volume is {:?}", json.result);
-            return json.result;
+            json.result
         }
         Err(Error::Status(code, _response)) => {
             println!("bad response {} ", code);
-            return -1;  // ugh
+            -1  // ugh TODO FIX
         }
         Err(_) => {
             println!("really bad response");
-            return -1; // ugh TODO FIX
+            -1 // ugh TODO FIX
         }
     }
     // TODO consider return Option<i32> as this means 'dunno' right now.
@@ -186,80 +186,94 @@ fn next() {
 
 }
 
-fn toggle_play_pause() {
-    let agent: Agent = ureq::AgentBuilder::new()
-        .timeout_read(Duration::from_secs(5))
-        .timeout_write(Duration::from_secs(5))
-        .build();
-    println!("Toggle Play/pause volume");
+fn toggle_play_pause(mut last_processed: std::time::Instant) {
+    if last_processed.elapsed() >= Duration::from_millis(SWITCH_DEBOUNCE_MILLIS) {
+        //let new_now = Instant::now();
+        //println!("It has been {:?}", new_now.saturating_duration_since(last_processed));
+        let agent: Agent = ureq::AgentBuilder::new()
+            .timeout_read(Duration::from_secs(5))
+            .timeout_write(Duration::from_secs(5))
+            .build();
+        println!("Toggle Play/pause volume");
 
-    let mut method: String= "core.playback.pause".to_string();
-    // get play state {"jsonrpc": "2.0", "id": 1, "result": "paused"}
-    // may be paused, playing or stopped
-    let resp: Result<Response, Error> = agent.post(MOPIDY_RPC_ENDPOINT)
-        //.send_json(SerdeValue::)  // todo get this to work with JsonRpcRequest
-        .send_json(ureq::json!({
+        let mut method: String= "core.playback.pause".to_string();
+        // get play state {"jsonrpc": "2.0", "id": 1, "result": "paused"}
+        // may be paused, playing or stopped
+        let resp: Result<Response, Error> = agent.post(MOPIDY_RPC_ENDPOINT)
+            //.send_json(SerdeValue::)  // todo get this to work with JsonRpcRequest
+            .send_json(ureq::json!({
            "jsonrpc": "2.0",
            "id": 1,
            "method": "core.playback.get_state",
        }));
-    match resp {
-        Ok(response) => {
-            let json: JsonRpcResponseString = response.into_json().expect("duff json");
-            println!("get_state result was {:?}", json.result);
-            if json.result.ne("playing") {  // may be paused, playing or stopped
-                method = "core.playback.play".to_string();
+        match resp {
+            Ok(response) => {
+                let json: JsonRpcResponseString = response.into_json().expect("duff json");
+                println!("get_state result was {:?}", json.result);
+                if json.result.ne("playing") {  // may be paused, playing or stopped
+                    method = "core.playback.play".to_string();
+                }
             }
+            Err(Error::Status(code, _response)) => {panic!("bad response {} ", code);}
+            Err(_) => { panic!("really bad response");}
         }
-        Err(Error::Status(code, _response)) => {panic!("bad response {} ", code);}
-        Err(_) => { panic!("really bad response");}
-    }
 
-    // actually try to change the state
-    let change_response: Result<Response, Error> = agent.post(MOPIDY_RPC_ENDPOINT)
-        //.send_json(SerdeValue::)  // todo get this to work with JsonRpcRequest
-        .send_json(ureq::json!({
+        // actually try to change the state
+        let change_response: Result<Response, Error> = agent.post(MOPIDY_RPC_ENDPOINT)
+            //.send_json(SerdeValue::)  // todo get this to work with JsonRpcRequest
+            .send_json(ureq::json!({
            "jsonrpc": "2.0",
            "id": 1,
            "method": method,
        }));
-    match change_response {
-        Ok(_response2) => {
-            println!("changed to state: {}", &method);
+        match change_response {
+            Ok(_response2) => {
+                println!("changed to state: {}", &method);
+            }
+            Err(Error::Status(code, _response)) => {panic!("bad response {} ", code);}
+            Err(_) => { panic!("really bad response");}
         }
-        Err(Error::Status(code, _response)) => {panic!("bad response {} ", code);}
-        Err(_) => { panic!("really bad response");}
-    }
+    } //else {
+      //  println!("TOO SOON, ignoring");
+    //}
+
 }
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>>  {
     println!("encoders2mopidy starting");
-    let (tx, rx) = mpsc::channel();
+    let (volume_transmitter, volume_sender) = mpsc::channel();
 
     // start the thread that sends volume change messages to mopidy.
-    std::thread::spawn(move || mopidy_volume_message_handler(rx));
+    std::thread::spawn(move || mopidy_volume_message_handler(volume_sender));
 
     let rotary2_dt = DigitalInputDevice::new_with_pullup(12); //rot 1: 4
     let rotary2_clk = DigitalInputDevice::new_with_pullup(6); //rot 1: 14
     let mut rotary2_button = Gpio::new()?.get(ROTARY2_BUTTON)?.into_input_pulldown(); // GPIO 16, phys 36
     let mut rotary1_button = Gpio::new()?.get(ROTARY1_BUTTON)?.into_input_pulldown();
 
+    // listen for button presses and toggle play/pause state, with some simple
+    // time-based switch debouncing.
+    let mut rotary2_last_processed = Instant::now();
+    rotary2_button.set_async_interrupt(FallingEdge, move |_level| {
+        toggle_play_pause(rotary2_last_processed);
+        rotary2_last_processed = Instant::now();
+    }).expect("bad interrupt setup rot2");
+
+    let mut rotary1_last_processed = Instant::now();
+    rotary1_button.set_async_interrupt(FallingEdge, move |_level| { next() }).expect("bad interrupt setup rot1");
+
     let agent: Agent = ureq::AgentBuilder::new()
         .timeout_read(Duration::from_secs(5))
         .timeout_write(Duration::from_secs(5))
         .build();
-
-    rotary2_button.set_async_interrupt(FallingEdge, |_level| { toggle_play_pause() }).expect("bad interrupt setup rot2");
-    rotary1_button.set_async_interrupt(FallingEdge, |_level| { next() }).expect("bad interrupt setup rot1");
-
     let mut volume = get_volume(&agent);
-    println!("volume is {}", &volume);
+    println!("On startup, volume is {}", &volume);
 
-    //while RUNNING.load(Ordering::Relaxed)
+    // loop forever reading the rotary2 encoder and sending new volume settings
+    // to the mopidy_volume_message_handler thread.
     loop
     {
-        //println!("in while running.load");
         thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
         let mut dt_val = rotary2_dt.value();
         let mut clk_val = rotary2_clk.value();
@@ -267,8 +281,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>>  {
         if dt_val.eq(&true) && clk_val.eq(&false) {
             volume = volume +1;
             println!("-> {}", volume);
-            //set_volume(&agent, volume);
-            tx.send(volume).unwrap();
+            volume_transmitter.send(volume).unwrap();
             while clk_val.eq(&false) {
                 thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
                 clk_val = rotary2_clk.value();
@@ -281,8 +294,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>>  {
             volume = volume -1;
             if volume < 0 { volume = 0;}
             println!("<- {}", volume);
-            //set_volume(&agent, volume);
-            tx.send(volume).unwrap();
+            volume_transmitter.send(volume).unwrap();
             while dt_val.eq(&true) {
                 thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
                 dt_val = rotary2_dt.value();
