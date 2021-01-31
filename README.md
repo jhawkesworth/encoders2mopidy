@@ -45,7 +45,7 @@ GND  ------------------<
 GPIO ----- ENC CLK ---
 ```
 
-Setup
+#Setup
 
 To cross-compile from sources on ubuntu
 ```
@@ -76,7 +76,8 @@ The exe should then be manageable as a service using normal systemd operations.
 
 Remember to enable using systemctl
 
-Software power on off via gpio button.
+#Software power on off via gpio button.
+
 
 If you have a pushbutton lying around you can connect it up between a ground pin and
 gpio 3 (only gpio 3 apparent - tip from stderr.nl/Blog/ )
