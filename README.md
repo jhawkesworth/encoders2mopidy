@@ -5,30 +5,30 @@ A service to allow Mopidy to be controlled using Pimoroni COM1006 RGB Rotary Enc
 Written in rough-and-ready Rust, cross compiled for Arm v6 (Raspberry Pi Zero W).
 
 I am not recommending anybody does this.
+
 Having realised rotary encoders really need a microcontroller, I decided to plough on and see if I could use rust to get me out of the hole I had dug myself into by buying bits before doing the reading.
 This is the result. 
 
 ---
 If anyone happens to have the necessary hardware lying around, here's how it needs to be setup.
 
-BOM
+## Bill of Materials
 
-Pirate audio 3w stereo board: https://shop.pimoroni.com/products/pirate-audio-3w-stereo-amp
-Raspberry Pi Zero W https://thepihut.com/products/raspberry-pi-zero-w
-
-Veroboard
-
-2 * RGB Rotary encoders with push switch  https://shop.pimoroni.com/products/rotary-encoder-illuminated-rgb 
+* Pirate audio 3w stereo board: https://shop.pimoroni.com/products/pirate-audio-3w-stereo-amp
+* Raspberry Pi Zero W https://thepihut.com/products/raspberry-pi-zero-w
+* Veroboard
+* 2 * RGB Rotary encoders with push switch  https://shop.pimoroni.com/products/rotary-encoder-illuminated-rgb 
 common anode
-Any old momentary contact push button
-8 * 220 Ohm resistors
-
-MicroSD Card at least 8Gb
-Wire and solder
+* Any old momentary contact push button
+* 8 * 220 Ohm resistors
+* MicroSD Card at least 8Gb
+* Some way of breaking out the unused pins from the Pirate audio board.
+(I split a 20 cm 40-way IDC cable which I wouldn't recommend it was fiddly and took a long time)
+* Hookup wire and solder
+* Some old radio or case to put it in.
+* A 4 Ohm speaker cable of being driven by a 3 W amp.  I used original radio speaker because it has character.
 
 TODO fritzing diagram.
-
-
 
 The veroboard is essentially just a way of inserting the correct resistors between the gpio pins and the encoders.
 
@@ -45,7 +45,9 @@ GND  ------------------<
 GPIO ----- ENC CLK ---
 ```
 
-#Setup
+# Setup
+
+## Compilation
 
 To cross-compile from sources on ubuntu
 ```
@@ -70,14 +72,15 @@ build and copy to your Raspberry Pi.  Run it like
 
 Once you are happy the code is doing what you want,
 
+## Set up a systemd unit to run the program as a service.
+
 Copy the encoders2modpidy.service file to /etc/systemd/system (you'll need to sudo).
 
-The exe should then be manageable as a service using normal systemd operations.
+The exe should then be manageable as a service using normal systemd operations (systemctl/journalctl).
 
-Remember to enable using systemctl
+Remember to enable using systemctl so it comes up on reboot.
 
-#Software power on off via gpio button.
-
+## Set up software power on off via gpio button.
 
 If you have a pushbutton lying around you can connect it up between a ground pin and
 gpio 3 (only gpio 3 apparent - tip from stderr.nl/Blog/ )
