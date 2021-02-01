@@ -1,7 +1,19 @@
 [Unit]
 Description=A service to allow Mopidy to be controlled using Pimoroni COM1006 RGB Rotary Encoders
-After=systemd-user-sessions.service
+After=avahi-daemon.service
+After=dbus.service
+After=network-online.target
+Wants=network-online.target
+After=nss-lookup.target
+After=pulseaudio.service
+After=remote-fs.target
+After=sound.target
+After=mopidy.service
+Wants=mopidy.service
 
 [Service]
 Type=simple
 ExecStart=/home/pi/code/encoders2mopidy
+
+[Install]
+WantedBy=multi-user.target
