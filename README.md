@@ -8,6 +8,11 @@ I am not recommending anybody does this.
 
 Having realised rotary encoders really need a microcontroller, I decided to plough on and see if I could use rust to get me out of the hole I had dug myself into by buying bits before doing the reading.
 This is the result. 
+TLDR is the volume encoder is pretty twitchy as there's only really a narrow range (about 20 values) in my particular 
+setup as the amp is really more powerful than the original speaker can take.
+The buttons are still overly sensitive too.
+I have since read that I should have used more ground pins rather than sharing a common one 
+for everything connected to the veroboard, so that might improve things.
 
 ---
 If anyone happens to have the necessary hardware lying around, here's how it needs to be setup.
@@ -28,22 +33,54 @@ common anode
 * Some old radio or case to put it in.
 * A 4 Ohm speaker cable of being driven by a 3 W amp.  I used original radio speaker because it has character.
 
-TODO fritzing diagram.
+Here's how I laid out the veroboard.
 
-The veroboard is essentially just a way of inserting the correct resistors between the gpio pins and the encoders.
+![Veroboard diagram](veroboard-layout.jpg)
 
+The veroboard is pretty much just a way of inserting the correct resistors between the gpio pins and the encoders.
+Each square represents a hole in the veroboard and an X in the square indicates a track break.
+
+About the RGB Encoders.
 Since they are common anode LEDS, they are powered from 3v3 bus and switched by the gpio pins.
 
 ```
-                       |-------- >| R ------------------ 220Ohm --- GPIO
-           +3v3  ------+-------- >| G ----------------- 220Ohm --- GPIO
-                       |-------- >| B ------------------ 220Ohm --- GPIO
-                       |-------- / SW ---------------- 220Ohm --- GPIO
+RGB Led part of encoder
+                       |-------- >| R ----------------- 220 Ohm --- GPIO
+           +3v3  ------+-------- >| G ----------------- 220 Ohm --- GPIO
+                       |-------- >| B ----------------- 220 Ohm --- GPIO
+                       |-------- / SW ----------------- 220 Ohm --- GPIO
+Encoder connections
 
 GPIO ----- ENC DT ---
 GND  ------------------<
 GPIO ----- ENC CLK ---
 ```
+
+Despite what it says on pinout.xyz the Pirate Audio 3W board seems to use the following physical pins.
+To be fair, there have clearly been a couple of revisions of the board so it 
+
+2,12,14,17,19,21,22,23,26,33,35,40
+
+I used the following physical pins
+```
+1 3v3
+5 Ri Pi POWER Button ( short to earth to soft boot up down )
+7 ENC1 ROTARY DT
+8 ENC1 ROTARY CLK
+9 GND
+10 ENC1 SWITCH
+11 ENC1 RED
+13 ENC1 GREEN
+15 ENC1 BLUE
+27 ENC2 RED
+28 ENC2 GREEN
+29 ENC2 BLUE
+31 ENC2 ROTARY DT
+32 ENC2 ROTARY CLK
+36 ENC2 SWITCH
+```
+It would have been better to make up some headers as it would have made experimenting and troubleshooting easier. 
+
 
 # Setup
 
@@ -92,3 +129,8 @@ dtoverlay=gpio-shutdown,gpio_pin=3
 The board still gets powered and you'd do well to wait until all the LED flashing
 has stopped before disconnecting the power cable. 
 
+#Changelog
+24 Jan 2021.  1st commit.
+1 Feb 2020.  Fixed up the systemd unit
+13 March 2021.  Added veroboard picture to readme.  
+                Added failed experiment to get rid of rust_gpiozero to separate branch.
