@@ -130,7 +130,9 @@ The board still gets powered and you'd do well to wait until all the LED flashin
 has stopped before disconnecting the power cable. 
 
 # Changelog
+```
 24 Jan 2021.  1st commit.
 1 Feb 2020.  Fixed up the systemd unit
 13 March 2021.  Added veroboard picture to readme.  
                 Added failed experiment to get rid of rust_gpiozero to separate branch.
+```
