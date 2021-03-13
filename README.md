@@ -4,15 +4,38 @@ A service to allow Mopidy to be controlled using Pimoroni COM1006 RGB Rotary Enc
 
 Written in rough-and-ready Rust, cross compiled for Arm v6 (Raspberry Pi Zero W).
 
-I am not recommending anybody does this.
+Having realised rotary encoders really need a microcontroller, I decided to plough on and see 
+if I could use rust to get me out of the hole I had dug myself into by buying bits before doing the reading.
+Python was too slow to handle the rotary encoders and handle playing music on the little Pi Zero W, 
+so I wondered, would rust be fast enough?
 
-Having realised rotary encoders really need a microcontroller, I decided to plough on and see if I could use rust to get me out of the hole I had dug myself into by buying bits before doing the reading.
+Initially I thought I'd write a mopidy plugin, but I found it has a rest api so it was much more
+straightforward to call the api from rust then try to bridge rust to python via py03.
+
 This is the result. 
-TLDR is the volume encoder is pretty twitchy as there's only really a narrow range (about 20 values) in my particular 
-setup as the amp is really more powerful than the original speaker can take.
+
+It was fun, I learned a bunch, but I am not recommending anybody does this.
+
+TLDR Rust is _plenty_ fast enough.  Even though there's a tight loop watching the encoder, it only uses about 2% cpu
+time according to 'top'.
+
+That said, the results aren't great - the volume encoder is pretty twitchy as there's 
+only really a narrow range (about 20 values) in my particular 
+setup as the amp is more powerful than the original 1960s speaker can take.
 The buttons are still overly sensitive too.
+
 I have since read that I should have used more ground pins rather than sharing a common one 
-for everything connected to the veroboard, so that might improve things.
+for everything connected to the veroboard, so that might improve things, as would better
+soldering skills, using proper resistors rather than the variable ones I had lying around.
+
+The code is not great either, using 2 different libraries to talk to gpio.  While I got the LEDs
+to light, I haven't integrated the code for that either, so this is just using the rotary and built-in buttons.
+One point about the code worth recalling is that I switched to ureq from reqwest as I am calling the rest api
+locally on the same machine where mopidy is running and ureq lets you turn off https support, which I didn't
+need, allowing for a much smaller binary and quicker compilation and remote sync, in this case.
+
+I don't intend updating this code further but wanted to go through the process of doing it and documenting it on 
+github as a learning experience, and a building block for further things.
 
 ---
 If anyone happens to have the necessary hardware lying around, here's how it needs to be setup.
@@ -135,4 +158,5 @@ has stopped before disconnecting the power cable.
 1 Feb 2020.  Fixed up the systemd unit
 13 March 2021.  Added veroboard picture to readme.  
                 Added failed experiment to get rid of rust_gpiozero to separate branch.
+                Close down project.
 ```
