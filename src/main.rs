@@ -2,9 +2,9 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use rust_gpiozero::*;
+//use rust_gpiozero::*;
 
-use rppal::gpio::Gpio;
+use rppal::gpio::{Gpio, Level};
 use rppal::gpio::Trigger::FallingEdge;
 
 //use std::io;
@@ -15,6 +15,7 @@ use serde::{Serialize, Deserialize};
 
 use std::sync::mpsc;
 use ureq::{Agent, Response, Error};
+use Level::{High, Low};
 
 
 /*
@@ -47,8 +48,8 @@ const ROTARY2_CLK: u8 = 6; // GPIO 6 phys 31
 const ROTARY2_BUTTON: u8 = 16; // GPIO 16, phys 36
 
 const MOPIDY_RPC_ENDPOINT: &str = "http://localhost:6680/mopidy/rpc";
-const ENCODER_WAIT_MILLIS: u64 = 2;
-const MOPIDY_RECOVERY_TIME_WAIT_MILLIS: u64 = 222;
+const ENCODER_WAIT_MILLIS: u64 = 3;
+const MOPIDY_RECOVERY_TIME_WAIT_MILLIS: u64 = 333;
 
 const SWITCH_DEBOUNCE_MILLIS: u64 = 333;
 
@@ -161,32 +162,33 @@ fn get_volume(agent: &ureq::Agent) -> i32 {
 }
 
 
-fn next() {
-    let agent: Agent = ureq::AgentBuilder::new()
-        .timeout_read(Duration::from_secs(5))
-        .timeout_write(Duration::from_secs(5))
-        .build();
-    println!("Advance to next track");
-    let method: String= "core.playback.next".to_string();
+fn next(last_processed: std::time::Instant) {
+    if last_processed.elapsed() >= Duration::from_millis(SWITCH_DEBOUNCE_MILLIS) {
+        let agent: Agent = ureq::AgentBuilder::new()
+            .timeout_read(Duration::from_secs(5))
+            .timeout_write(Duration::from_secs(5))
+            .build();
+        println!("Advance to next track");
+        let method: String = "core.playback.next".to_string();
 
-    let change_response: Result<Response, Error> = agent.post(MOPIDY_RPC_ENDPOINT)
-        //.send_json(SerdeValue::)  // todo get this to work with JsonRpcRequest
-        .send_json(ureq::json!({
+        let change_response: Result<Response, Error> = agent.post(MOPIDY_RPC_ENDPOINT)
+            //.send_json(SerdeValue::)  // todo get this to work with JsonRpcRequest
+            .send_json(ureq::json!({
            "jsonrpc": "2.0",
            "id": 1,
            "method": method,
        }));
-    match change_response {
-        Ok(_response2) => {
-            println!("Success response for method: {}", &method);
+        match change_response {
+            Ok(_response2) => {
+                println!("Success response for method: {}", &method);
+            }
+            Err(Error::Status(code, _response)) => { panic!("bad response {} ", code); }
+            Err(_) => { panic!("really bad response"); }
         }
-        Err(Error::Status(code, _response)) => {panic!("bad response {} ", code);}
-        Err(_) => { panic!("really bad response");}
     }
-
 }
 
-fn toggle_play_pause(mut last_processed: std::time::Instant) {
+fn toggle_play_pause(last_processed: std::time::Instant) {
     if last_processed.elapsed() >= Duration::from_millis(SWITCH_DEBOUNCE_MILLIS) {
         //let new_now = Instant::now();
         //println!("It has been {:?}", new_now.saturating_duration_since(last_processed));
@@ -247,8 +249,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>>  {
     // start the thread that sends volume change messages to mopidy.
     std::thread::spawn(move || mopidy_volume_message_handler(volume_sender));
 
-    let rotary2_dt = DigitalInputDevice::new_with_pullup(12); //rot 1: 4
-    let rotary2_clk = DigitalInputDevice::new_with_pullup(6); //rot 1: 14
+    let rotary2_dt = Gpio::new()?.get(ROTARY2_DT)?.into_input_pullup(); // rot 1: 4
+    let rotary2_clk = Gpio::new()?.get(ROTARY2_CLK)?.into_input_pullup(); // rot 1: 14
+    //let rotary2_dt = DigitalInputDevice::new_with_pullup(12); //rot 1: 4
+    //let rotary2_clk = DigitalInputDevice::new_with_pullup(6); //rot 1: 14
     let mut rotary2_button = Gpio::new()?.get(ROTARY2_BUTTON)?.into_input_pulldown(); // GPIO 16, phys 36
     let mut rotary1_button = Gpio::new()?.get(ROTARY1_BUTTON)?.into_input_pulldown();
 
@@ -261,7 +265,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>>  {
     }).expect("bad interrupt setup rot2");
 
     let mut rotary1_last_processed = Instant::now();
-    rotary1_button.set_async_interrupt(FallingEdge, move |_level| { next() }).expect("bad interrupt setup rot1");
+    rotary1_button.set_async_interrupt(FallingEdge, move |_level| {
+        next(rotary1_last_processed);
+        rotary1_last_processed = Instant::now();
+    }).expect("bad interrupt setup rot1");
 
     let agent: Agent = ureq::AgentBuilder::new()
         .timeout_read(Duration::from_secs(5))
@@ -275,33 +282,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>>  {
     loop
     {
         thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
-        let mut dt_val = rotary2_dt.value();
-        let mut clk_val = rotary2_clk.value();
+        let mut dt_val = rotary2_dt.read();
+        let mut clk_val = rotary2_clk.read();
+        //let mut dt_val = rotary2_dt.value();
+        //let mut clk_val = rotary2_clk.value();
 
-        if dt_val.eq(&true) && clk_val.eq(&false) {
+        //if rotary2_dt.is_high() && rotary2_clk.is_low() {}
+        if dt_val.eq(&High) && clk_val.eq(&Low) {
+        //if dt_val.eq(&true) && clk_val.eq(&false) {
             volume = volume +1;
             println!("-> {}", volume);
             volume_transmitter.send(volume).unwrap();
-            while clk_val.eq(&false) {
+            while clk_val.eq(&Low) {
                 thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
-                clk_val = rotary2_clk.value();
+                clk_val = rotary2_clk.read();
             }
-            while clk_val.eq(&true) {
+            while clk_val.eq(&High) {
                 thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
-                clk_val = rotary2_clk.value();
+                clk_val = rotary2_clk.read();
             }
-        } else if dt_val.eq(&true) && clk_val.eq(&true) {
+        } else if dt_val.eq(&High) && clk_val.eq(&High) {
             volume = volume -1;
             if volume < 0 { volume = 0;}
             println!("<- {}", volume);
             volume_transmitter.send(volume).unwrap();
-            while dt_val.eq(&true) {
+            while dt_val.eq(&High) {
                 thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
-                dt_val = rotary2_dt.value();
+                dt_val = rotary2_dt.read();
             }
         }
         else { // both false, wait a bit
-            thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
+           // thread::sleep(Duration::from_millis(ENCODER_WAIT_MILLIS));
         }
     }
     //Ok(())
