@@ -129,7 +129,7 @@ dtoverlay=gpio-shutdown,gpio_pin=3
 The board still gets powered and you'd do well to wait until all the LED flashing
 has stopped before disconnecting the power cable. 
 
-#Changelog
+# Changelog
 24 Jan 2021.  1st commit.
 1 Feb 2020.  Fixed up the systemd unit
 13 March 2021.  Added veroboard picture to readme.  
